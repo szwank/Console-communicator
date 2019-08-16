@@ -1,0 +1,9 @@
+﻿# Ignorowanie zawartości folderu
+.idea/**
+__pycache__/**
+
+
+
+
+# Ignorowanie poszczegulnych plików
+
