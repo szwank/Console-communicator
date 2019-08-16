@@ -1,62 +1,71 @@
 import socket
 import threading
-import time
-import hashlib
-import uuid
+from utils import HashPassword, DisplayClientLogs
 
 class UTP_client():
 
     def __init__(self, server_ip, server_port, password, name='User'):
-        self.server_ip = server_ip
-        self.server_port = server_port
-        self.name = name
+        self.__server_ip = server_ip
+        self.__server_port = server_port
+        self.__name = name
 
-        self.password_hash = self.__hash_password(password)
+        self.__password_hash = HashPassword.hash_password(password)
 
-        self.__establish_connection_with_server()
+        self.__connection = self.__create_connection_with_server()
 
-        self.receive_message_thread = threading.Thread(target=self.__receive_message, args=())
+        self.__receive_message_thread = threading.Thread(target=self.__receive_message, args=())
 
-        self.stop_client = threading.Event()
+        self.__stop_client = threading.Event()
 
     def __receive_message(self):
-        while not self.stop_client.is_set():
-            pass
-
-    def send_message(self, message):
+        while not self.__stop_client.is_set():
             try:
-                self.__send_message_to_server(self.name + ": " + message)
+                message, address = self.__connection.recvfrom(1024)
+                if address == (self.__server_ip, self.__server_port):
+                    thread = threading.Thread(target=self.__handle_message, kwargs={'message': message})
+                    thread.start()
             except:
                 pass
 
-    def __establish_connection_with_server(self):
-        self.connection = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
-        self.connection.bind((self.server_ip, 0))
-        self.connection.setblocking(False)
+    def __handle_message(self, message):
+        self.__print_recived_message(message.decode())
+
+
+    def send_message(self, message):
+        if message is "RECONNECT":
+            self.__connect_to_server()
+        else:
+            try:
+                self.__send_message_to_server(self.__name + ": " + message)
+            except:
+                pass
+
+    def __create_connection_with_server(self):
+        connection = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
+        connection.bind((self.__server_ip, 0))
+        connection.setblocking(False)
+        return connection
 
     def __connect_to_server(self):
-        self.__send_message_to_server(self.password_hash)
+        self.__send_message_to_server("PASSWORD:" + self.__password_hash)
 
     def start(self):
         self.__connect_to_server()
-        self.receive_message_thread.start()
-
-    def __hash_password(self, password):
-        salt = uuid.uuid4().hex
-        return hashlib.sha256(salt.encode() + password.encode()).hexdigest() + ':' + salt
-
+        self.__receive_message_thread.start()
 
     def __send_message_to_server(self, message):
-        self.connection.sendto(message.encode(), (self.server_ip, self.server_port))
+        self.__connection.sendto(message.encode(), (self.__server_ip, self.__server_port))
 
-class DisplayLogs():
-    @staticmethod
-    def print_message(message, name):
-        print(name + ": " + message)
+    def __print_recived_message(self, message):
+        DisplayClientLogs.print_message(message)
 
-    @staticmethod
-    def print_client_log(message):
-        print(str(time.ctime(time.time())) + ": " + str(message))
+    def stop(self):
+        self.__stop_client.set()
+        self.__print_client_log('Client stopped')
+
+    def __print_client_log(self, message):
+        DisplayClientLogs.print_client_log(message)
+
 
 
 def main():
@@ -74,7 +83,7 @@ def main():
     while message != 'q':
         client.send_message(message)
         message = input("--> ")
-
+    client.stop()
 
 if __name__ == '__main__':
     main()

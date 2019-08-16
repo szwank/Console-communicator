@@ -1,87 +1,76 @@
 import socket
-import time
+from utils import DisplayServerLogs, HashPassword
 import threading
 
+
 class UTP_server():
-    def __init__(self, ip, port):
-        self.connected_clients = []
-        self.client_thread = []
+    def __init__(self, ip, port, password=None):
+        self.__connected_clients = []
+        self.__client_thread = []
 
-        self.connection = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
-        self.connection.bind((ip, port))
-        self.connection.setblocking(False)
+        self.__password = self.__hash_password(password)
 
-        self.listen_for_new_connections = threading.Thread(target=self.__listen_for_new_clients, args=())
+        self.__connection = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
+        self.__connection.bind((ip, port))
+        self.__connection.setblocking(False)
 
-        self.stop_server = threading.Event()
+        self.__handle_incoming_data_thread = threading.Thread(target=self.__listen_for_incoming_messages, args=())
+
+        self.__stop_server = threading.Event()
 
     def start(self):
-        self.listen_for_new_connections.start()
+        self.__handle_incoming_data_thread.start()
         self.__print_server_log("Server started")
 
+    def __hash_password(self, password):
+        if password is None:
+            return None
+        else:
+            return HashPassword.hash_password(password)
 
+    def __password_is_correct(self, client_password):
+        return HashPassword.check_password(self.__password, client_password)
 
     def ___add_client(self, address):
-        self.connected_clients.append(address)
-        self.__add_thread_for_client(address)
+        self.__connected_clients.append(address)
+        self.__print_server_log('Added client ' + str(address))
 
-    def __listen_for_new_clients(self):
-        while not self.stop_server.is_set():
-            try:
-                _, address = self.connection.recvfrom(1024)     # _ omit one received variable
-                if address not in self.connected_clients:
+    def __handle_message(self, message, address):
+        if address in self.__connected_clients:
+            self.__print_message_log(message, address)
+            self.__send_message_to_others_users(message=message, sender_adress=address)
+        else:
+            if message.decode().split(':')[0] == 'PASSWORD':
+                if self.__password is None or self.__password_is_correct(message.decode().split(':')[1]):
                     self.___add_client(address)
-                    self.__print_server_log('Added client ' + str(address))
-            except:
-                pass
 
-    def __add_thread_for_client(self, client_address):
-        self.client_thread.append(threading.Thread(target=self.__listen_client_messages, kwargs={'client_address':client_address}))
-        self.client_thread[-1].start()
-
-    def __listen_client_messages(self, client_address):
-        while not self.stop_server.is_set():
+    def __listen_for_incoming_messages(self):
+        while not self.__stop_server.is_set():
             try:
-                message, address = self.connection.recvfrom(1024)
-                if address == client_address and address in self.connected_clients:
-                    self.__print_message_log(message.decode(), address)
+                message, address = self.__connection.recvfrom(1024)
+                arguments = {'message': message, 'address': address}
+                thread = threading.Thread(target=self.__handle_message, kwargs=arguments)
+                thread.start()
             except:
                 pass
 
-    def __resend_message_to_others_users(self, message, sender_adress):
-        for address in self.connected_clients:
+    def __send_message_to_others_users(self, message, sender_adress):
+        for address in self.__connected_clients:
             if address != sender_adress:
-                self.connection.sendto(message.encode(), address)
+                self.__connection.sendto(message, address)
 
     def __print_message_log(self, message, address):
-        Display_logs.print_message_log(message, address)
+        DisplayServerLogs.print_message_log(message.decode(), address)
 
     def __print_server_log(self, message):
-        Display_logs.print_server_log(message)
+        DisplayServerLogs.print_server_log(message)
 
     def close(self):
-        self.stop_server.set()
-        for thread in self.client_thread:
-            thread.join()
+        self.__stop_server.set()
 
-        self.listen_for_new_connections.join()
+        self.__handle_incoming_data_thread.join()
 
-        Display_logs.print_message_log("Server_closed")
-
-class Display_logs:
-
-    @staticmethod
-    def print_message_log(message, address):
-        print(str(time.ctime(time.time())) + ": Recived message from " + str(address) + ": " + str(message))
-
-
-    @staticmethod
-    def print_server_log(message):
-        print(str(time.ctime(time.time())) + ": " + str(message))
-
-
-
-
+        DisplayServerLogs.print_server_log("Server closed")
 
 
 def main():
@@ -91,7 +80,11 @@ def main():
     server = UTP_server(IP, PORT)
 
     server.start()
+    command = input()
+    while command != 'q':
+        command = input()
 
+    server.close()
 
 if __name__ == '__main__':
     main()
